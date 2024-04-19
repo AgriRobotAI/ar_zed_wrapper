@@ -48,7 +48,12 @@ void depthImageToROSmsg(
   sl::float1 * depthDataPtr = img.getPtr<sl::float1>();
 
   for (int i = 0; i < dataSize; i++) {
-    *(data++) = static_cast<uint16_t>(std::round(*(depthDataPtr++) * 1000));  // in mm, rounded
+    *(data++) = static_cast<uint16_t>(std::round(*(depthDataPtr++) /** 1000*/));  // in mm, rounded
+    // NOTE(Walter) You set 
+    // initParameters.coordinate_units = sl::UNIT::MILLIMETER;
+    // initParameters.depth_minimum_distance = 300;
+    // initParameters.depth_maximum_distance = 10000;
+    // hence you must not multiply by 1000, the depth map is already in millimeters
   }
 
   pub->publish(std::move(msg));
@@ -148,7 +153,11 @@ public:
       std::bind(&ZedStreamer::timer_callback, this));
 
     rclcpp::SensorDataQoS qos;
-    qos.best_effort();
+    qos.keep_last(5);
+    //qos.best_effort(); 
+    // NOTE(Walter): I recommend using the default settings (RELIABLE). 
+    // Best effort causes many communication issues.
+    // A short history is instead recommended
 
     zed_1_depth_ = this->create_publisher<sensor_msgs::msg::Image>("zed_1/depth", qos);
     zed_1_image_right_ = this->create_publisher<sensor_msgs::msg::Image>("zed_1/image_left", qos);
@@ -196,7 +205,7 @@ void ZedStreamer::initCameras()
 {
   sl::InitParameters initParameters;
   initParameters.camera_resolution = sl::RESOLUTION::HD1200;
-  initParameters.depth_mode = sl::DEPTH_MODE::ULTRA;
+  initParameters.depth_mode = sl::DEPTH_MODE::NEURAL;
   initParameters.camera_fps = 15;
   initParameters.coordinate_system = sl::COORDINATE_SYSTEM::RIGHT_HANDED_Z_UP_X_FWD;
   initParameters.coordinate_units = sl::UNIT::MILLIMETER;
