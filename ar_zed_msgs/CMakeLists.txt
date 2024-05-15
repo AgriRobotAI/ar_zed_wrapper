@@ -12,9 +12,13 @@ find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(builtin_interfaces REQUIRED)
 
-rosidl_generate_interfaces(${PROJECT_NAME}
-"msgs/StereoComposite.msg"
-DEPENDENCIES sensor_msgs std_msgs builtin_interfaces
-)
+rosidl_generate_interfaces(
+  ${PROJECT_NAME}
+  "msgs/StereoComposite.msg"
+  "msgs/CombinedCameraInfo.msg"
+  DEPENDENCIES
+  sensor_msgs
+  std_msgs
+  builtin_interfaces)
 
 ament_package()

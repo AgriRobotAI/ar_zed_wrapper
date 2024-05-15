@@ -1,23 +1,26 @@
-  #ifndef ZED_STREAMER_NODE_
-  #define ZED_STREAMER_NODE_
+#ifndef ZED_STREAMER_NODE_
+#define ZED_STREAMER_NODE_
 
-  #include "rclcpp/rclcpp.hpp"
-  #include "rclcpp_components/register_node_macro.hpp"
+#include "rclcpp/rclcpp.hpp"
+#include "rclcpp_components/register_node_macro.hpp"
 
-  #include <sl/Camera.hpp>
+#include <sl/Camera.hpp>
 
-  #include <iostream>
-  #include <chrono>
-  #include <cstdlib>
-  #include <memory>
-  #include <regex>
-  #include <string>
-  #include <iostream>
+#include <iostream>
+#include <chrono>
+#include <cstdlib>
+#include <memory>
+#include <regex>
+#include <string>
+#include <iostream>
 
-  #include "sensor_msgs/msg/image.hpp"
-  #include <sensor_msgs/image_encodings.hpp>
+#include "sensor_msgs/msg/image.hpp"
+#include "sensor_msgs/msg/camera_info.hpp"
+#include <sensor_msgs/distortion_models.hpp>
+#include <sensor_msgs/image_encodings.hpp>
 
-  #include <ar_zed_msgs/msg/stereo_composite.hpp>
+#include <ar_zed_msgs/msg/stereo_composite.hpp>
+#include <ar_zed_msgs/msg/combined_camera_info.hpp>
 
 
 using namespace std::chrono_literals;
@@ -30,6 +33,8 @@ public:
   {
     initParameters();
     initCameras();
+    getCameraInfoMsg();
+
 
     // publishing period for each camera
     int period_ms = static_cast<int>(periode_ * 1000 / NB_ZED_);
@@ -50,6 +55,10 @@ public:
     composite_pub_rear_ = this->create_publisher<ar_zed_msgs::msg::StereoComposite>(
       "/stereo_composite/rear",
       qos);
+
+    camera_info_pub_ = this->create_publisher<ar_zed_msgs::msg::CombinedCameraInfo>(
+      "/combined_camera_info", qos);
+
   }
 
   ~ZedStreamer()
@@ -78,6 +87,14 @@ private:
   void initCameras();
   void timer_callback();
 
+  void getCameraInfoMsg();
+  void fillCamInfo(
+    sl::CalibrationParameters zedParam,
+    sl::Resolution resolution,
+    sensor_msgs::msg::CameraInfo & leftCamInfoMsg,
+    sensor_msgs::msg::CameraInfo & rightCamInfoMsg,
+    const std::string & leftFrameId, const std::string & rightFrameId);
+
   sensor_msgs::msg::Image depthImageToMsg(
     sl::Mat & depth_map, rclcpp::Time t,
     std::string camera_name);
@@ -93,6 +110,9 @@ private:
 
   std::shared_ptr<rclcpp::Publisher<ar_zed_msgs::msg::StereoComposite>> composite_pub_front_;
   std::shared_ptr<rclcpp::Publisher<ar_zed_msgs::msg::StereoComposite>> composite_pub_rear_;
+
+  std::shared_ptr<rclcpp::Publisher<ar_zed_msgs::msg::CombinedCameraInfo>> camera_info_pub_;
+  ar_zed_msgs::msg::CombinedCameraInfo combined_cam_info_;
 
   double periode_;
 
@@ -143,7 +163,6 @@ void ZedStreamer::initCameras()
   RCLCPP_INFO_STREAM(this->get_logger(), NB_ZED_ << " ZEDs initialized. Ready for STREAMING");
 
   zeds_ptr_ = zeds_.begin();
-
 }
 
 
@@ -207,6 +226,10 @@ void ZedStreamer::timer_callback()
   if (zeds_ptr_ == zeds_.end()) {
     zeds_ptr_ = zeds_.begin();
   }
+
+
+  RCLCPP_INFO_STREAM(this->get_logger(), "Publishing camera info");
+  camera_info_pub_->publish(combined_cam_info_);
 
 }
 
@@ -323,6 +346,138 @@ sensor_msgs::msg::Image ZedStreamer::imageToROSmsg(
   return msg;
 }
 
+
+// function copied and simplified from ZED wrapper:
+// https://github.com/stereolabs/zed-ros2-wrapper/blob/f88bb492fa01754365f0ac0d56e70fd29d55bbee/zed_components/src/zed_camera/src/zed_camera_component.cpp#L3148
+void ZedStreamer::fillCamInfo(
+  sl::CalibrationParameters zedParam,
+  sl::Resolution resolution,
+  sensor_msgs::msg::CameraInfo & leftCamInfoMsg,
+  sensor_msgs::msg::CameraInfo & rightCamInfoMsg,
+  const std::string & leftFrameId, const std::string & rightFrameId)
+{
+  RCLCPP_DEBUG(
+    this->get_logger(), "param left fx: %f, fy: %f, cx: %f, cy: %f",
+    zedParam.left_cam.fx, zedParam.left_cam.fy, zedParam.left_cam.cx, zedParam.left_cam.cy);
+  RCLCPP_DEBUG(
+    this->get_logger(), "param right fx: %f, fy: %f, cx: %f, cy: %f",
+    zedParam.right_cam.fx, zedParam.right_cam.fy, zedParam.right_cam.cx, zedParam.right_cam.cy);
+
+  float baseline = zedParam.getCameraBaseline();
+
+
+  // ----> Distortion models
+  // ZED SDK params order: [ k1, k2, p1, p2, k3, k4, k5, k6, s1, s2, s3, s4]
+  // Radial (k1, k2, k3, k4, k5, k6), Tangential (p1,p2) and Prism (s1, s2, s3,
+  // s4) distortion. Prism not currently used.
+
+  // ROS2 order (OpenCV) -> k1,k2,p1,p2,k3,k4,k5,k6,s1,s2,s3,s4
+
+  leftCamInfoMsg.distortion_model =
+    sensor_msgs::distortion_models::RATIONAL_POLYNOMIAL;
+  rightCamInfoMsg.distortion_model =
+    sensor_msgs::distortion_models::RATIONAL_POLYNOMIAL;
+  leftCamInfoMsg.d.resize(8);
+  rightCamInfoMsg.d.resize(8);
+  leftCamInfoMsg.d[0] = zedParam.left_cam.disto[0];        // k1
+  leftCamInfoMsg.d[1] = zedParam.left_cam.disto[1];        // k2
+  leftCamInfoMsg.d[2] = zedParam.left_cam.disto[2];        // p1
+  leftCamInfoMsg.d[3] = zedParam.left_cam.disto[3];        // p2
+  leftCamInfoMsg.d[4] = zedParam.left_cam.disto[4];        // k3
+  leftCamInfoMsg.d[5] = zedParam.left_cam.disto[5];        // k4
+  leftCamInfoMsg.d[6] = zedParam.left_cam.disto[6];        // k5
+  leftCamInfoMsg.d[7] = zedParam.left_cam.disto[7];        // k6
+  rightCamInfoMsg.d[0] = zedParam.right_cam.disto[0];      // k1
+  rightCamInfoMsg.d[1] = zedParam.right_cam.disto[1];      // k2
+  rightCamInfoMsg.d[2] = zedParam.right_cam.disto[2];      // p1
+  rightCamInfoMsg.d[3] = zedParam.right_cam.disto[3];      // p2
+  rightCamInfoMsg.d[4] = zedParam.right_cam.disto[4];      // k3
+  rightCamInfoMsg.d[5] = zedParam.right_cam.disto[5];      // k4
+  rightCamInfoMsg.d[6] = zedParam.right_cam.disto[6];      // k5
+  rightCamInfoMsg.d[7] = zedParam.right_cam.disto[7];      // k6
+
+
+  leftCamInfoMsg.k.fill(0.0);
+  rightCamInfoMsg.k.fill(0.0);
+  leftCamInfoMsg.k[0] = static_cast<double>(zedParam.left_cam.fx);
+  leftCamInfoMsg.k[2] = static_cast<double>(zedParam.left_cam.cx);
+  leftCamInfoMsg.k[4] = static_cast<double>(zedParam.left_cam.fy);
+  leftCamInfoMsg.k[5] = static_cast<double>(zedParam.left_cam.cy);
+  leftCamInfoMsg.k[8] = 1.0;
+  rightCamInfoMsg.k[0] = static_cast<double>(zedParam.right_cam.fx);
+  rightCamInfoMsg.k[2] = static_cast<double>(zedParam.right_cam.cx);
+  rightCamInfoMsg.k[4] = static_cast<double>(zedParam.right_cam.fy);
+  rightCamInfoMsg.k[5] = static_cast<double>(zedParam.right_cam.cy);
+  rightCamInfoMsg.k[8] = 1.0;
+  leftCamInfoMsg.r.fill(0.0);
+  rightCamInfoMsg.r.fill(0.0);
+
+  for (size_t i = 0; i < 3; i++) {
+    // identity
+    rightCamInfoMsg.r[i + i * 3] = 1;
+    leftCamInfoMsg.r[i + i * 3] = 1;
+  }
+
+  leftCamInfoMsg.p.fill(0.0);
+  rightCamInfoMsg.p.fill(0.0);
+  leftCamInfoMsg.p[0] = static_cast<double>(zedParam.left_cam.fx);
+  leftCamInfoMsg.p[2] = static_cast<double>(zedParam.left_cam.cx);
+  leftCamInfoMsg.p[5] = static_cast<double>(zedParam.left_cam.fy);
+  leftCamInfoMsg.p[6] = static_cast<double>(zedParam.left_cam.cy);
+  leftCamInfoMsg.p[10] = 1.0;
+  // http://docs.ros.org/api/sensor_msgs/html/msg/CameraInfo.html
+  rightCamInfoMsg.p[3] =
+    static_cast<double>(-1 * zedParam.left_cam.fx * baseline);
+  rightCamInfoMsg.p[0] = static_cast<double>(zedParam.right_cam.fx);
+  rightCamInfoMsg.p[2] = static_cast<double>(zedParam.right_cam.cx);
+  rightCamInfoMsg.p[5] = static_cast<double>(zedParam.right_cam.fy);
+  rightCamInfoMsg.p[6] = static_cast<double>(zedParam.right_cam.cy);
+  rightCamInfoMsg.p[10] = 1.0;
+
+
+  leftCamInfoMsg.width = rightCamInfoMsg.width =
+    static_cast<uint32_t>(resolution.width);
+  leftCamInfoMsg.height = rightCamInfoMsg.height =
+    static_cast<uint32_t>(resolution.width);
+
+  leftCamInfoMsg.header.frame_id = leftFrameId;
+  rightCamInfoMsg.header.frame_id = rightFrameId;
+}
+
+// get left and right camera parameters of all zed cameras and push them to private variable
+void ZedStreamer::getCameraInfoMsg()
+{
+  for (int i = 0; i < NB_ZED_; i++) {
+    sl::CalibrationParameters zedParam =
+      zeds_[i].getCameraInformation().camera_configuration.calibration_parameters;
+    sl::Resolution resolution = zeds_[i].getCameraInformation().camera_configuration.resolution;
+
+    sensor_msgs::msg::CameraInfo leftCamInfoMsg;
+    sensor_msgs::msg::CameraInfo rightCamInfoMsg;
+
+    fillCamInfo(
+      zedParam,
+      resolution,
+      leftCamInfoMsg,
+      rightCamInfoMsg,
+      "left", "right");
+
+
+    // select camera front or rear
+    unsigned int serial_number = zeds_[i].getCameraInformation().serial_number;
+    std::string camera_name = camera_names_[serial_number];
+    if (camera_name == "camera_front") {
+      combined_cam_info_.front_left = leftCamInfoMsg;
+      combined_cam_info_.front_right = rightCamInfoMsg;
+      RCLCPP_INFO(this->get_logger(), "Camera name: %s, assigned config", camera_name.c_str());
+    } else if (camera_name == "camera_rear") {
+      combined_cam_info_.rear_left = leftCamInfoMsg;
+      combined_cam_info_.rear_right = rightCamInfoMsg;
+      RCLCPP_INFO(this->get_logger(), "Camera name: %s, assigned config", camera_name.c_str());
+    }
+  }
+}
+
 RCLCPP_COMPONENTS_REGISTER_NODE(ZedStreamer)
 
-  #endif // ZED_STREAMER_NODE__
+#endif // ZED_STREAMER_NODE__

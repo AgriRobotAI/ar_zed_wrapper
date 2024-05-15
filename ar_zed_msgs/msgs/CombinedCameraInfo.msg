@@ -1,0 +1,4 @@
+sensor_msgs/CameraInfo front_left
+sensor_msgs/CameraInfo front_right
+sensor_msgs/CameraInfo rear_left
+sensor_msgs/CameraInfo rear_right
