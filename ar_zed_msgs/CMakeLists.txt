@@ -16,6 +16,7 @@ rosidl_generate_interfaces(
   ${PROJECT_NAME}
   "msgs/StereoComposite.msg"
   "msgs/CombinedCameraInfo.msg"
+  "msgs/ToolMonitoringResults.msg"
   DEPENDENCIES
   sensor_msgs
   std_msgs
