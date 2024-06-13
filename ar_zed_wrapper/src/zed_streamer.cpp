@@ -14,6 +14,9 @@
 #include <string>
 #include <iostream>
 
+#include <cv_bridge/cv_bridge.h>
+#include <opencv2/opencv.hpp>
+
 #include "sensor_msgs/msg/image.hpp"
 #include "sensor_msgs/msg/camera_info.hpp"
 #include <sensor_msgs/distortion_models.hpp>
@@ -59,6 +62,10 @@ public:
     camera_info_pub_ = this->create_publisher<ar_zed_msgs::msg::CombinedCameraInfo>(
       "/combined_camera_info", qos);
 
+    qos.best_effort();
+    raw_pub_front_ = this->create_publisher<sensor_msgs::msg::Image>("/implement/zed/tines/resized",qos);
+    raw_pub_rear_ = this->create_publisher<sensor_msgs::msg::Image>("/implement/zed/rollers/resized",qos);
+
   }
 
   ~ZedStreamer()
@@ -68,7 +75,7 @@ public:
       if (zeds_[z].isOpened()) {
         if (pool_[z].joinable()) {
           pool_[z].join();
-        }
+        } 
       }
     }
 
@@ -112,6 +119,8 @@ private:
   std::shared_ptr<rclcpp::Publisher<ar_zed_msgs::msg::StereoComposite>> composite_pub_rear_;
 
   std::shared_ptr<rclcpp::Publisher<ar_zed_msgs::msg::CombinedCameraInfo>> camera_info_pub_;
+  std::shared_ptr<rclcpp::Publisher<sensor_msgs::msg::Image>> raw_pub_rear_;
+  std::shared_ptr<rclcpp::Publisher<sensor_msgs::msg::Image>> raw_pub_front_;
   ar_zed_msgs::msg::CombinedCameraInfo combined_cam_info_;
 
   double periode_;
@@ -176,10 +185,14 @@ void ZedStreamer::timer_callback()
   RCLCPP_DEBUG(this->get_logger(), "Camera name: %s", camera_name.c_str());
 
   std::shared_ptr<rclcpp::Publisher<ar_zed_msgs::msg::StereoComposite>> publisher;
+  std::shared_ptr<rclcpp::Publisher<sensor_msgs::msg::Image>> raw_publisher;
   if (camera_name == "camera_front") {
     publisher = composite_pub_front_;
+    raw_publisher  = raw_pub_front_;
+
   } else if (camera_name == "camera_rear") {
     publisher = composite_pub_rear_;
+    raw_publisher  = raw_pub_rear_;
   }
 
 
@@ -220,6 +233,35 @@ void ZedStreamer::timer_callback()
 
   RCLCPP_INFO_STREAM(this->get_logger(), "Publishing message of camera: " << camera_name);
   publisher->publish(msg);
+
+
+
+
+
+    // Convert ROS Image message to OpenCV image
+    cv_bridge::CvImagePtr cv_ptr;
+    try {
+      cv_ptr = cv_bridge::toCvCopy(msg.right_n, sensor_msgs::image_encodings::BGR8);
+    } catch (cv_bridge::Exception& e) {
+      RCLCPP_ERROR(this->get_logger(), "cv_bridge exception: %s", e.what());
+      return;
+    }
+
+    // Resize the image
+    cv::Mat resized_image;
+    cv::resize(cv_ptr->image, resized_image, cv::Size(640, 360)); // Resize to half the original size
+
+//     // Convert OpenCV image back to ROS Image message
+    cv_bridge::CvImage out_msg;
+    out_msg.header = cv_ptr->header; // Same timestamp and tf frame as input image
+    out_msg.encoding = sensor_msgs::image_encodings::BGR8;
+    out_msg.image = resized_image;
+
+
+//   raw_publisher->publish(out_msg.toImageMsg());
+
+  auto output_msg = out_msg.toImageMsg();
+  raw_publisher->publish(*output_msg);
 
   // increment the camera pointer
   zeds_ptr_++;

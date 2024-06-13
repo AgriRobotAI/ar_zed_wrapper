@@ -64,9 +64,11 @@ find_package(rclcpp)
 find_package(std_msgs REQUIRED)
 find_package(zed_interfaces REQUIRED)
 find_package(ar_zed_msgs REQUIRED)
+find_package(cv_bridge REQUIRED)
+find_package(OpenCV REQUIRED)
 
 # INCLUDES and LIBS
-include_directories(${CUDA_INCLUDE_DIRS} ${ZED_INCLUDE_DIRS})
+include_directories(${CUDA_INCLUDE_DIRS} ${ZED_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS})
 
 include_directories(include)
 
@@ -92,6 +94,8 @@ ament_target_dependencies(
   zed_interfaces
   std_msgs
   ar_zed_msgs
+  cv_bridge
+  OpenCV
   ZED
   CUDA)
 
