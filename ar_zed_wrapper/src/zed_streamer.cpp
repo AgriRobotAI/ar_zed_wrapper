@@ -231,7 +231,7 @@ void ZedStreamer::timer_callback()
   msg.capture_time_n = slTimestampToROSTime(timestamp_n);
   msg.depth_n = depthImageToMsg(depth_map, slTimestampToROSTime(timestamp_n), camera_name);
 
-  RCLCPP_INFO_STREAM(this->get_logger(), "Publishing message of camera: " << camera_name);
+//   RCLCPP_INFO_STREAM(this->get_logger(), "Publishing message of camera: " << camera_name);
   publisher->publish(msg);
 
 
@@ -270,7 +270,7 @@ void ZedStreamer::timer_callback()
   }
 
 
-  RCLCPP_INFO_STREAM(this->get_logger(), "Publishing camera info");
+//   RCLCPP_INFO_STREAM(this->get_logger(), "Publishing camera info");
   camera_info_pub_->publish(combined_cam_info_);
 
 }
